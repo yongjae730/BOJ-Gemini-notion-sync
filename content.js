@@ -1,10 +1,9 @@
-// [content.js] 채점 현황 감지 및 데이터 크롤링 전문
+// [content.js] 언어 감지 및 데이터 크롤링
 
 let isProcessing = false;
-// [핵심] 이미 처리한 제출 번호를 저장하는 목록 (중복 실행 방지)
 const processedSubmissions = new Set();
 
-// 1. 화면 알림 함수 (Toast)
+// 1. 화면 알림 (Toast)
 function showToast(message, type = "info") {
   const existingToast = document.getElementById("boj-notion-toast");
   if (existingToast) existingToast.remove();
@@ -39,7 +38,6 @@ function showToast(message, type = "info") {
 
   document.body.appendChild(toast);
 
-  // 4초 뒤 제거 (성공/실패 시)
   if (type !== "info") {
     setTimeout(() => {
       toast.style.opacity = "0";
@@ -48,15 +46,7 @@ function showToast(message, type = "info") {
   }
 }
 
-// 2. HTML 태그 제거 및 텍스트 추출 (DOMParser 사용)
-function parseHtmlText(htmlString, selector) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlString, "text/html");
-  const element = doc.querySelector(selector);
-  return element ? element.innerText.trim() : "내용 없음";
-}
-
-// 3. 채점 현황 감지
+// 2. 채점 현황 감지
 const observer = new MutationObserver((mutations) => {
   if (isProcessing) return;
 
@@ -64,12 +54,8 @@ const observer = new MutationObserver((mutations) => {
   if (rows.length === 0) return;
 
   const firstRow = rows[0];
-
-  // 제출 번호 추출 (중복 방지용 key)
-  // id="solution-123456" 형태
   const submitId = firstRow.id.replace("solution-", "");
 
-  // [중요] 이미 처리한 제출이면 무시! (스크롤 문제 해결)
   if (processedSubmissions.has(submitId)) return;
 
   const resultCell = firstRow.querySelector(".result-text");
@@ -77,14 +63,17 @@ const observer = new MutationObserver((mutations) => {
   // "맞았습니다" 감지
   if (resultCell && resultCell.innerText.includes("맞았습니다")) {
     isProcessing = true;
-    processedSubmissions.add(submitId); // 처리 목록에 등록
+    processedSubmissions.add(submitId);
 
-    showToast("정답입니다! 데이터 수집 및 AI 분석 시작...", "info");
+    // [핵심] 언어 정보 가져오기 (7번째 칸)
+    // 예: "node.js", "Python 3", "Java 11", "C++17"
+    const langText = firstRow.querySelector("td:nth-child(7)").innerText.trim();
+
+    showToast(`정답! (${langText}) 분석을 시작합니다...`, "info");
 
     const problemId = firstRow.querySelector('a[href^="/problem/"]').innerText;
 
-    // 데이터 수집 시작
-    startProcess(submitId, problemId);
+    startProcess(submitId, problemId, langText);
   }
 });
 
@@ -93,58 +82,56 @@ if (targetNode) {
   observer.observe(targetNode, { childList: true, subtree: true });
 }
 
-// 4. 데이터 수집 (소스코드 + 문제정보)
-async function startProcess(submitId, problemId) {
+// 3. 데이터 수집
+async function startProcess(submitId, problemId, language) {
   try {
-    // A. 소스 코드 가져오기
+    // A. 소스 코드
     const sourceRes = await fetch(`https://www.acmicpc.net/source/${submitId}`);
     const sourceHtml = await sourceRes.text();
     const parser = new DOMParser();
     const sourceDoc = parser.parseFromString(sourceHtml, "text/html");
     const code = sourceDoc.querySelector('textarea[name="source"]').value;
 
-    // B. 문제 정보 가져오기 (제목, 본문, 입출력)
+    // B. 문제 정보
     const problemRes = await fetch(`https://www.acmicpc.net/problem/${problemId}`);
     const problemHtml = await problemRes.text();
     const problemDoc = parser.parseFromString(problemHtml, "text/html");
 
-    // [수정] 문제 제목 정확히 가져오기 (#problem_title)
     const titleElement = problemDoc.querySelector("#problem_title");
     const realTitle = titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`;
     const fullTitle = `${problemId}번: ${realTitle}`;
 
-    // 문제 본문, 입력, 출력 (HTML 태그 제거하고 텍스트만)
     const description = problemDoc.querySelector("#problem_description")?.innerText.trim() || "내용 없음";
     const inputEx = problemDoc.querySelector("#sample-input-1")?.innerText.trim() || "없음";
     const outputEx = problemDoc.querySelector("#sample-output-1")?.innerText.trim() || "없음";
 
-    // C. 백그라운드로 데이터 전송 (이제 background.js는 받아서 쏘기만 하면 됨)
+    // C. 백그라운드 전송 (언어 정보 포함)
     chrome.runtime.sendMessage(
       {
         action: "analyzeAndUpload",
         data: {
           code: code,
-          title: fullTitle, // 정확한 제목
+          title: fullTitle,
           problemId: problemId,
           desc: description,
           input: inputEx,
           output: outputEx,
+          language: language, // 언어 정보 전송
         },
       },
       (response) => {
         if (response.success) {
-          showToast(`"${realTitle}" 정리 완료! 노션에 저장되었습니다.`, "success");
+          showToast(`"${realTitle}" 정리 완료!`, "success");
         } else {
-          showToast("실패: " + (response.error || "알 수 없는 오류"), "error");
-          // 실패 시 재시도를 위해 처리 목록에서 제거 (선택사항)
+          showToast("실패: " + (response.error || "오류"), "error");
           processedSubmissions.delete(submitId);
         }
         isProcessing = false;
       }
     );
   } catch (e) {
-    console.error("데이터 수집 실패:", e);
-    showToast("데이터를 가져오는 중 오류가 발생했습니다.", "error");
+    console.error("수집 실패:", e);
+    showToast("데이터 수집 중 오류 발생", "error");
     isProcessing = false;
     processedSubmissions.delete(submitId);
   }

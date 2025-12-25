@@ -1,6 +1,29 @@
-// [background.js] Gemini 및 Notion API 통신 전담
+// [background.js] 다국어 지원 (Python, C++, Java, Node.js)
 
-// 마크다운 기호 제거 유틸
+// [핵심] 백준 언어명을 노션 언어 코드로 변환
+function mapBojLangToNotion(bojLang) {
+  const lang = bojLang.toLowerCase(); // 소문자로 통일
+
+  // 1. Node.js -> javascript
+  if (lang.includes("node")) return "javascript";
+
+  // 2. Java -> java
+  if (lang.includes("java") && !lang.includes("script")) return "java";
+
+  // 3. Python, PyPy -> python
+  if (lang.includes("python") || lang.includes("pypy")) return "python";
+
+  // 4. C++ -> c++
+  if (lang.includes("c++")) return "c++";
+
+  // 5. C -> c
+  if (lang === "c" || lang.includes("c11")) return "c";
+
+  // 그 외
+  return "plain text";
+}
+
+// 텍스트 청소 유틸
 function cleanText(text) {
   if (!text) return "";
   let str = String(text);
@@ -20,22 +43,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.error(err);
         sendResponse({ success: false, error: err.message });
       });
-    return true; // 비동기 응답 유지
+    return true;
   }
 });
 
 async function processRequest(data) {
-  // content.js가 다 구해서 줬음
-  const { code, title, problemId, desc, input, output } = data;
+  // language 정보를 받음
+  const { code, title, problemId, desc, input, output, language } = data;
+
+  // 언어 변환 (예: "node.js" -> "javascript")
+  const notionLang = mapBojLangToNotion(language);
 
   const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) {
     throw new Error("확장 프로그램 아이콘을 눌러 API 키를 먼저 설정해주세요.");
   }
 
-  // 1. Gemini에게 분석 요청
+  // 1. Gemini 프롬프트 (언어 정보를 명시)
   const prompt = `
-      너는 알고리즘 멘토야. Java 코드를 분석해줘.
+      너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
       2. "analysis"는 3~5문장의 리스트(Array).
@@ -63,21 +89,19 @@ async function processRequest(data) {
     .replace(/```json/g, "")
     .replace(/```/g, "")
     .trim();
-  const match = jsonStr.match(/\{[\s\S]*\}/); // JSON 부분만 추출
+  const match = jsonStr.match(/\{[\s\S]*\}/);
 
   let analysisData = { analysis: ["분석 실패"], tags: [] };
   if (match) {
     try {
       analysisData = JSON.parse(match[0]);
-    } catch (e) {
-      console.error("JSON 파싱 에러", e);
-    }
+    } catch (e) {}
   }
 
   // 2. 노션 블록 조립
   const childrenBlocks = [];
 
-  // [A] 문제 정보 (토글)
+  // [A] 문제 정보
   childrenBlocks.push({
     object: "block",
     type: "toggle",
@@ -118,17 +142,21 @@ async function processRequest(data) {
     }
   });
 
-  // [C] 내 코드
+  // [C] 내 코드 (언어 적용)
   childrenBlocks.push({
     object: "block",
     type: "heading_2",
-    heading_2: { rich_text: [{ text: { content: "💻 Java Code" } }] },
+    heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] }, // 제목: "💻 node.js Code"
   });
+
   for (let i = 0; i < code.length; i += 2000) {
     childrenBlocks.push({
       object: "block",
       type: "code",
-      code: { language: "java", rich_text: [{ text: { content: code.substring(i, i + 2000) } }] },
+      code: {
+        language: notionLang, // [핵심] 변환된 언어("javascript") 사용
+        rich_text: [{ text: { content: code.substring(i, i + 2000) } }],
+      },
     });
   }
 
@@ -146,7 +174,7 @@ async function processRequest(data) {
     body: JSON.stringify({
       parent: { database_id: keys.dbId },
       properties: {
-        이름: { title: [{ text: { content: title } }] }, // 이제 정확한 제목이 들어감
+        이름: { title: [{ text: { content: title } }] },
         날짜: { date: { start: today } },
         알고리즘: { multi_select: tags },
       },
