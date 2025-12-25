@@ -1,34 +1,21 @@
-// [유틸] 텍스트 청소 (마크다운 기호 제거)
+// [background.js] Gemini 및 Notion API 통신 전담
+
+// 마크다운 기호 제거 유틸
 function cleanText(text) {
   if (!text) return "";
   let str = String(text);
   str = str.replace(/`/g, "");
   str = str.replace(/\*\*/g, "");
   str = str.replace(/__/g, "");
-  str = str.replace(/^\s*[-*]\s+/gm, ""); // 리스트 기호 제거
-  str = str.replace(/^\s*\d+\.\s+/gm, ""); // 숫자 리스트 제거
+  str = str.replace(/^\s*[-*]\s+/gm, "");
+  str = str.replace(/^\s*\d+\.\s+/gm, "");
   return str.trim();
-}
-
-// [유틸] HTML 태그 제거
-function stripHtml(html) {
-  if (!html) return "";
-  let text = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n");
-  text = text.replace(/<[^>]+>/g, ""); // 태그 삭제
-  text = text
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-  return text.trim();
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "analyzeAndUpload") {
     processRequest(request.data)
-      .then((res) => {
-        sendResponse({ success: true });
-      })
+      .then(() => sendResponse({ success: true }))
       .catch((err) => {
         console.error(err);
         sendResponse({ success: false, error: err.message });
@@ -38,35 +25,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function processRequest(data) {
-  const { code, title, problemId } = data;
+  // content.js가 다 구해서 줬음
+  const { code, title, problemId, desc, input, output } = data;
 
   const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) {
-    throw new Error("API 키 설정이 필요합니다.");
+    throw new Error("확장 프로그램 아이콘을 눌러 API 키를 먼저 설정해주세요.");
   }
 
-  // 1. 문제 정보(본문, 입력, 출력) 가져오기
-  let problemInfo = { desc: "내용을 가져올 수 없습니다.", input: "없음", output: "없음" };
-
-  if (problemId) {
-    try {
-      const res = await fetch(`https://www.acmicpc.net/problem/${problemId}`);
-      const html = await res.text();
-
-      // 정규식으로 필요한 부분만 쏙쏙 뽑기
-      const descMatch = html.match(/<div id="problem_description"[^>]*>([\s\S]*?)<\/div>/);
-      const inputMatch = html.match(/<pre[^>]*id="sample-input-1"[^>]*>([\s\S]*?)<\/pre>/);
-      const outputMatch = html.match(/<pre[^>]*id="sample-output-1"[^>]*>([\s\S]*?)<\/pre>/);
-
-      if (descMatch) problemInfo.desc = stripHtml(descMatch[1]);
-      if (inputMatch) problemInfo.input = stripHtml(inputMatch[1]);
-      if (outputMatch) problemInfo.output = stripHtml(outputMatch[1]);
-    } catch (e) {
-      console.log("문제 가져오기 실패:", e);
-    }
-  }
-
-  // 2. Gemini에게 분석 요청
+  // 1. Gemini에게 분석 요청
   const prompt = `
       너는 알고리즘 멘토야. Java 코드를 분석해줘.
       [규칙]
@@ -96,38 +63,44 @@ async function processRequest(data) {
     .replace(/```json/g, "")
     .replace(/```/g, "")
     .trim();
-  const match = jsonStr.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Gemini 응답에서 JSON을 찾을 수 없습니다.");
+  const match = jsonStr.match(/\{[\s\S]*\}/); // JSON 부분만 추출
 
-  const analysisData = JSON.parse(match[0]);
+  let analysisData = { analysis: ["분석 실패"], tags: [] };
+  if (match) {
+    try {
+      analysisData = JSON.parse(match[0]);
+    } catch (e) {
+      console.error("JSON 파싱 에러", e);
+    }
+  }
 
-  // 3. 노션 블록 조립
+  // 2. 노션 블록 조립
   const childrenBlocks = [];
 
-  // [A] 접이식 문제 설명 (Toggle)
+  // [A] 문제 정보 (토글)
   childrenBlocks.push({
     object: "block",
     type: "toggle",
     toggle: {
       rich_text: [{ text: { content: `📂 문제 정보: ${title} (Click)` } }],
       children: [
-        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: problemInfo.desc.substring(0, 1800) } }] } },
+        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: desc.substring(0, 1800) } }] } },
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "📥 입력 예시" } }] } },
-        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: problemInfo.input } }] } },
+        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "📤 출력 예시" } }] } },
-        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: problemInfo.output } }] } },
+        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: output.substring(0, 1000) } }] } },
       ],
     },
   });
 
-  // [B] AI 분석 (Quote + List)
+  // [B] AI 분석
   childrenBlocks.push({
     object: "block",
     type: "heading_2",
     heading_2: { rich_text: [{ text: { content: "💡 풀이 전략" } }] },
   });
 
-  const analysisList = analysisData.analysis || ["분석 실패"];
+  const analysisList = analysisData.analysis || ["분석 내용 없음"];
   analysisList.forEach((line, index) => {
     const cleaned = cleanText(line);
     if (index === 0) {
@@ -159,7 +132,7 @@ async function processRequest(data) {
     });
   }
 
-  // 4. 노션 전송
+  // 3. 노션 전송
   const today = new Date().toISOString().split("T")[0];
   const tags = (analysisData.tags || []).map((tag) => ({ name: tag }));
 
@@ -173,7 +146,7 @@ async function processRequest(data) {
     body: JSON.stringify({
       parent: { database_id: keys.dbId },
       properties: {
-        이름: { title: [{ text: { content: title } }] },
+        이름: { title: [{ text: { content: title } }] }, // 이제 정확한 제목이 들어감
         날짜: { date: { start: today } },
         알고리즘: { multi_select: tags },
       },
