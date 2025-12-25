@@ -1,2 +1,68 @@
-# BOJ-Gemini-notion-sync
-백준에서 푼 문제를 제미나이를 사용해 노션문서로 바꿔주는 프로젝트
+# 🚀 백준 AI 노션 자동 업로드 (BOJ to Notion AI)
+
+> **백준에서 문제를 풀면, Google Gemini가 코드를 분석하여 Notion에 자동으로 정리해줍니다.** >
+
+![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-yellow?style=flat-square)
+![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?style=flat-square)
+![Notion API](https://img.shields.io/badge/Notion-API-000000?style=flat-square)
+![Gemini API](https://img.shields.io/badge/Google-Gemini_2.5-8E75B2?style=flat-square)
+
+---
+
+## ✨ 주요 기능 (Features)
+
+1.  **완전 자동화**: 백준 채점 현황 페이지에서 **"맞았습니다!!"**가 뜨면 자동으로 분석이 시작됩니다.
+2.  **AI 코드 분석**: Google Gemini 2.5 모델을 사용하여 코드를 분석하여 풀이 방향성과 핵심 아이디어를 작성합니다.
+3.  **문제 정보 자동 수집**: 문제 본문, 입력/출력 예시를 자동으로 긁어와 노션에 깔끔한 **토글(Toggle)** 형태로 저장합니다.
+4.  **깔끔한 노션 정리**: 인용구, 리스트, 코드 블록을 활용하여 가독성 높은 노트를 생성합니다.
+5.  **태그 자동 분류**: 사용된 알고리즘(BFS, DP 등)을 분석하여 노션의 `Multi-select` 태그로 자동 분류합니다.
+
+---
+
+## 📸 스크린샷 (Screenshots)
+
+|       설정 화면        |           분석 알림           |         노션 결과물         |
+| :--------------------: | :---------------------------: | :-------------------------: |
+| _(여기에 팝업창 캡처)_ | _(여기에 우측상단 알림 캡처)_ | _(여기에 노션 페이지 캡처)_ |
+
+---
+
+## ⚙️ 사전 준비 (Prerequisites)
+
+이 익스텐션을 사용하기 위해서는 3가지 키(Key)가 필요합니다.
+
+1.  **Google Gemini API Key**: [Google AI Studio](https://aistudio.google.com/)에서 무료로 발급받으세요.
+2.  **Notion API Token**: [Notion Developers](https://www.notion.so/my-integrations)에서 '새 통합'을 만들고 시크릿 토큰을 복사하세요.
+3.  **Notion Database ID**: 노션 데이터베이스의 링크 복사 후, URL 중간의 32자리를 확인하세요.
+
+### ⚠️ 노션 데이터베이스 설정 필수
+
+연동할 노션 데이터베이스는 반드시 아래 **3가지 속성(Property)**을 가지고 있어야 합니다.
+
+- `이름` (제목 속성) : 문제 제목이 들어갑니다.
+- `날짜` (날짜 속성) : 풀이 날짜가 들어갑니다.
+- `알고리즘` (다중 선택/Multi-select) : 태그가 들어갑니다.
+
+> **중요**: 노션 데이터베이스 우측 상단 `...` -> `연결(Connections)` 메뉴에서 위에서 만든 통합(Integration)을 초대해야 합니다.
+
+---
+
+## 📦 설치 방법 (Installation)
+
+1.  이 레포지토리 우측 상단의 **Code** 버튼 -> **Download ZIP**을 클릭하여 다운로드 후 압축을 풉니다.
+2.  크롬 브라우저 주소창에 `chrome://extensions`를 입력합니다.
+3.  우측 상단의 **개발자 모드(Developer mode)** 스위치를 켭니다.
+4.  좌측 상단의 **압축해제된 확장 프로그램을 로드합니다(Load unpacked)** 버튼을 클릭합니다.
+5.  압축을 푼 폴더(`BOJ-Extension`)를 선택합니다.
+
+---
+
+## 🚀 사용 방법 (Usage)
+
+1.  크롬 우측 상단 퍼즐 아이콘🧩을 눌러 **'백준 AI 노션 자동 업로드'**를 고정(Pin)합니다.
+2.  아이콘을 클릭하여 **설정창**을 엽니다.
+3.  준비한 **Gemini Key, Notion Token, Database ID**를 입력하고 **[저장]**을 누릅니다.
+4.  이제 백준에서 문제를 풀고 **제출**하세요.
+5.  채점 결과가 **"맞았습니다!!"**로 바뀌면 우측 상단에 알림이 뜨며 자동으로 노션에 정리됩니다!
+
+---

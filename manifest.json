@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "백준 AI 노션 자동 업로드",
+  "version": "2.0",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*", "https://api.notion.com/*", "https://www.acmicpc.net/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.acmicpc.net/status*"],
+      "js": ["content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 320px;
+        padding: 15px;
+        font-family: sans-serif;
+      }
+      h2 {
+        margin-top: 0;
+        color: #0077ff;
+        text-align: center;
+      }
+      label {
+        display: block;
+        margin-top: 12px;
+        font-weight: bold;
+        font-size: 12px;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        margin-top: 5px;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      button {
+        width: 100%;
+        margin-top: 20px;
+        padding: 12px;
+        background: #0077ff;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #005bb5;
+      }
+      #status {
+        margin-top: 15px;
+        font-size: 13px;
+        text-align: center;
+        min-height: 20px;
+      }
+      .hidden {
+        display: none;
+      }
+      .guide {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 15px;
+        text-align: center;
+        background: #f1f1f1;
+        padding: 8px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🚀 BOJ to Notion</h2>
+
+    <div id="settings">
+      <div class="guide">최초 1회 설정이 필요합니다.</div>
+      <label>Gemini API Key</label>
+      <input type="password" id="geminiKey" placeholder="AI Studio 키 입력" />
+
+      <label>Notion Token</label>
+      <input type="password" id="notionToken" placeholder="secret_... 입력" />
+
+      <label>Database ID</label>
+      <input type="text" id="dbId" placeholder="데이터베이스 ID 입력" />
+
+      <button id="saveBtn">설정 저장하기</button>
+    </div>
+
+    <div id="actionArea" class="hidden">
+      <div class="guide">
+        백준 '소스 코드' 페이지에서
+        <br />
+        아래 버튼을 눌러주세요.
+      </div>
+      <button id="runBtn" style="background-color: #00c471">분석 & 업로드 시작</button>
+      <button id="resetBtn" style="background-color: #ccc; margin-top: 10px; font-size: 12px; padding: 8px">설정 초기화</button>
+    </div>
+
+    <p id="status"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>
