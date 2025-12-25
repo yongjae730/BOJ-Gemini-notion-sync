@@ -1,9 +1,8 @@
-// [content.js] 언어 감지 및 데이터 크롤링
+// [content.js] 2차원 배열 유지 + 입력/출력 설명 추가 버전
 
 let isProcessing = false;
 const processedSubmissions = new Set();
 
-// 1. 화면 알림 (Toast)
 function showToast(message, type = "info") {
   const existingToast = document.getElementById("boj-notion-toast");
   if (existingToast) existingToast.remove();
@@ -46,7 +45,6 @@ function showToast(message, type = "info") {
   }
 }
 
-// 2. 채점 현황 감지
 const observer = new MutationObserver((mutations) => {
   if (isProcessing) return;
 
@@ -60,15 +58,11 @@ const observer = new MutationObserver((mutations) => {
 
   const resultCell = firstRow.querySelector(".result-text");
 
-  // "맞았습니다" 감지
   if (resultCell && resultCell.innerText.includes("맞았습니다")) {
     isProcessing = true;
     processedSubmissions.add(submitId);
 
-    // [핵심] 언어 정보 가져오기 (7번째 칸)
-    // 예: "node.js", "Python 3", "Java 11", "C++17"
     const langText = firstRow.querySelector("td:nth-child(7)").innerText.trim();
-
     showToast(`정답! (${langText}) 분석을 시작합니다...`, "info");
 
     const problemId = firstRow.querySelector('a[href^="/problem/"]').innerText;
@@ -82,7 +76,6 @@ if (targetNode) {
   observer.observe(targetNode, { childList: true, subtree: true });
 }
 
-// 3. 데이터 수집
 async function startProcess(submitId, problemId, language) {
   try {
     // A. 소스 코드
@@ -101,22 +94,31 @@ async function startProcess(submitId, problemId, language) {
     const realTitle = titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`;
     const fullTitle = `${problemId}번: ${realTitle}`;
 
+    // 1. 문제 본문
     const description = problemDoc.querySelector("#problem_description")?.innerText.trim() || "내용 없음";
+
+    // [NEW] 2. 입력 설명 & 출력 설명 추가
+    const problemInput = problemDoc.querySelector("#problem_input")?.innerText.trim() || "입력 설명 없음";
+    const problemOutput = problemDoc.querySelector("#problem_output")?.innerText.trim() || "출력 설명 없음";
+
+    // 3. 예제 입출력
     const inputEx = problemDoc.querySelector("#sample-input-1")?.innerText.trim() || "없음";
     const outputEx = problemDoc.querySelector("#sample-output-1")?.innerText.trim() || "없음";
 
-    // C. 백그라운드 전송 (언어 정보 포함)
+    // C. 전송
     chrome.runtime.sendMessage(
       {
         action: "analyzeAndUpload",
         data: {
-          code: code,
+          code,
           title: fullTitle,
-          problemId: problemId,
+          problemId,
           desc: description,
+          problemInput, // [추가됨]
+          problemOutput, // [추가됨]
           input: inputEx,
           output: outputEx,
-          language: language, // 언어 정보 전송
+          language,
         },
       },
       (response) => {

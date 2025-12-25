@@ -1,29 +1,15 @@
-// [background.js] 다국어 지원 (Python, C++, Java, Node.js)
+// [background.js] 입력/출력 설명 포함 버전
 
-// [핵심] 백준 언어명을 노션 언어 코드로 변환
 function mapBojLangToNotion(bojLang) {
-  const lang = bojLang.toLowerCase(); // 소문자로 통일
-
-  // 1. Node.js -> javascript
+  const lang = bojLang.toLowerCase();
   if (lang.includes("node")) return "javascript";
-
-  // 2. Java -> java
   if (lang.includes("java") && !lang.includes("script")) return "java";
-
-  // 3. Python, PyPy -> python
   if (lang.includes("python") || lang.includes("pypy")) return "python";
-
-  // 4. C++ -> c++
   if (lang.includes("c++")) return "c++";
-
-  // 5. C -> c
   if (lang === "c" || lang.includes("c11")) return "c";
-
-  // 그 외
   return "plain text";
 }
 
-// 텍스트 청소 유틸
 function cleanText(text) {
   if (!text) return "";
   let str = String(text);
@@ -48,18 +34,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function processRequest(data) {
-  // language 정보를 받음
-  const { code, title, problemId, desc, input, output, language } = data;
+  // problemInput, problemOutput 추가됨
+  const { code, title, problemId, desc, problemInput, problemOutput, input, output, language } = data;
 
-  // 언어 변환 (예: "node.js" -> "javascript")
   const notionLang = mapBojLangToNotion(language);
 
   const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) {
-    throw new Error("확장 프로그램 아이콘을 눌러 API 키를 먼저 설정해주세요.");
+    throw new Error("API 키를 먼저 설정해주세요.");
   }
 
-  // 1. Gemini 프롬프트 (언어 정보를 명시)
+  // 1. Gemini 분석
   const prompt = `
       너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
@@ -101,17 +86,30 @@ async function processRequest(data) {
   // 2. 노션 블록 조립
   const childrenBlocks = [];
 
-  // [A] 문제 정보
+  // [A] 문제 정보 (토글) - 여기에 입력/출력 설명 추가!
   childrenBlocks.push({
     object: "block",
     type: "toggle",
     toggle: {
       rich_text: [{ text: { content: `📂 문제 정보: ${title} (Click)` } }],
       children: [
-        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: desc.substring(0, 1800) } }] } },
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "📥 입력 예시" } }] } },
+        // 1. 문제 본문
+        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: desc.substring(0, 1500) } }] } },
+
+        // [NEW] 2. 입력 설명
+        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "입력" } }] } },
+        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: problemInput.substring(0, 1000) } }] } },
+
+        // [NEW] 3. 출력 설명
+        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "출력" } }] } },
+        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: problemOutput.substring(0, 1000) } }] } },
+
+        // 4. 예제 입력
+        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 입력 1" } }] } },
         { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "📤 출력 예시" } }] } },
+
+        // 5. 예제 출력
+        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 출력 1" } }] } },
         { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: output.substring(0, 1000) } }] } },
       ],
     },
@@ -142,11 +140,11 @@ async function processRequest(data) {
     }
   });
 
-  // [C] 내 코드 (언어 적용)
+  // [C] 내 코드
   childrenBlocks.push({
     object: "block",
     type: "heading_2",
-    heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] }, // 제목: "💻 node.js Code"
+    heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] },
   });
 
   for (let i = 0; i < code.length; i += 2000) {
@@ -154,7 +152,7 @@ async function processRequest(data) {
       object: "block",
       type: "code",
       code: {
-        language: notionLang, // [핵심] 변환된 언어("javascript") 사용
+        language: notionLang,
         rich_text: [{ text: { content: code.substring(i, i + 2000) } }],
       },
     });
