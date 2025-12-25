@@ -1,8 +1,17 @@
-// [content.js] 2차원 배열 유지 + 입력/출력 설명 추가 버전
+// [content.js] 2차원 배열 강력 줄바꿈(<pre>) + 영구 기억 + 언어 감지
 
 let isProcessing = false;
 const processedSubmissions = new Set();
 
+// 1. [기억 기능] 저장소에서 이미 처리한 목록 불러오기
+chrome.storage.local.get(["processedList"], (result) => {
+  if (result.processedList) {
+    result.processedList.forEach((id) => processedSubmissions.add(id));
+    console.log("기존 처리 목록 로드 완료:", processedSubmissions.size + "개");
+  }
+});
+
+// 2. 알림 UI
 function showToast(message, type = "info") {
   const existingToast = document.getElementById("boj-notion-toast");
   if (existingToast) existingToast.remove();
@@ -45,6 +54,36 @@ function showToast(message, type = "info") {
   }
 }
 
+// 3. [핵심 수정] 표(Table)를 <pre> 태그로 변환 (줄바꿈 강제 적용)
+function convertTablesToText(element) {
+  if (!element) return;
+
+  const tables = element.querySelectorAll("table");
+  tables.forEach((table) => {
+    let tableText = ""; // 문자열로 누적
+    const rows = table.querySelectorAll("tr");
+
+    rows.forEach((row) => {
+      let rowParts = [];
+      const cells = row.querySelectorAll("td, th");
+      cells.forEach((cell) => {
+        rowParts.push(cell.innerText.trim());
+      });
+      // 행 데이터 + 줄바꿈(\n) 명시적 추가
+      tableText += rowParts.join("  ") + "\n";
+    });
+
+    // <pre> 태그 생성: 이 태그 안의 \n은 브라우저가 절대 무시하지 않음
+    const pre = document.createElement("pre");
+    pre.style.margin = "10px 0"; // 보기 좋게 여백
+    pre.style.fontFamily = "monospace"; // 고정폭 글꼴 (줄 맞춤)
+    pre.textContent = tableText; // 텍스트 삽입
+
+    table.replaceWith(pre);
+  });
+}
+
+// 4. 채점 현황 감지
 const observer = new MutationObserver((mutations) => {
   if (isProcessing) return;
 
@@ -54,6 +93,7 @@ const observer = new MutationObserver((mutations) => {
   const firstRow = rows[0];
   const submitId = firstRow.id.replace("solution-", "");
 
+  // [기억 기능]
   if (processedSubmissions.has(submitId)) return;
 
   const resultCell = firstRow.querySelector(".result-text");
@@ -76,16 +116,15 @@ if (targetNode) {
   observer.observe(targetNode, { childList: true, subtree: true });
 }
 
+// 5. 데이터 수집
 async function startProcess(submitId, problemId, language) {
   try {
-    // A. 소스 코드
     const sourceRes = await fetch(`https://www.acmicpc.net/source/${submitId}`);
     const sourceHtml = await sourceRes.text();
     const parser = new DOMParser();
     const sourceDoc = parser.parseFromString(sourceHtml, "text/html");
     const code = sourceDoc.querySelector('textarea[name="source"]').value;
 
-    // B. 문제 정보
     const problemRes = await fetch(`https://www.acmicpc.net/problem/${problemId}`);
     const problemHtml = await problemRes.text();
     const problemDoc = parser.parseFromString(problemHtml, "text/html");
@@ -94,18 +133,23 @@ async function startProcess(submitId, problemId, language) {
     const realTitle = titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`;
     const fullTitle = `${problemId}번: ${realTitle}`;
 
-    // 1. 문제 본문
-    const description = problemDoc.querySelector("#problem_description")?.innerText.trim() || "내용 없음";
+    // [표 해결] 가져오기 전에 표 변환 수행!
+    const descEl = problemDoc.querySelector("#problem_description");
+    const inputEl = problemDoc.querySelector("#problem_input");
+    const outputEl = problemDoc.querySelector("#problem_output");
 
-    // [NEW] 2. 입력 설명 & 출력 설명 추가
-    const problemInput = problemDoc.querySelector("#problem_input")?.innerText.trim() || "입력 설명 없음";
-    const problemOutput = problemDoc.querySelector("#problem_output")?.innerText.trim() || "출력 설명 없음";
+    convertTablesToText(descEl);
+    convertTablesToText(inputEl);
+    convertTablesToText(outputEl);
 
-    // 3. 예제 입출력
+    // <pre> 변환 후 innerText를 가져오면 줄바꿈이 유지됨
+    const description = descEl?.innerText.trim() || "내용 없음";
+    const problemInput = inputEl?.innerText.trim() || "입력 설명 없음";
+    const problemOutput = outputEl?.innerText.trim() || "출력 설명 없음";
+
     const inputEx = problemDoc.querySelector("#sample-input-1")?.innerText.trim() || "없음";
     const outputEx = problemDoc.querySelector("#sample-output-1")?.innerText.trim() || "없음";
 
-    // C. 전송
     chrome.runtime.sendMessage(
       {
         action: "analyzeAndUpload",
@@ -114,8 +158,8 @@ async function startProcess(submitId, problemId, language) {
           title: fullTitle,
           problemId,
           desc: description,
-          problemInput, // [추가됨]
-          problemOutput, // [추가됨]
+          problemInput,
+          problemOutput,
           input: inputEx,
           output: outputEx,
           language,
@@ -123,7 +167,8 @@ async function startProcess(submitId, problemId, language) {
       },
       (response) => {
         if (response.success) {
-          showToast(`"${realTitle}" 정리 완료!`, "success");
+          showToast(`"${realTitle}" 저장 완료!`, "success");
+          chrome.storage.local.set({ processedList: Array.from(processedSubmissions) });
         } else {
           showToast("실패: " + (response.error || "오류"), "error");
           processedSubmissions.delete(submitId);

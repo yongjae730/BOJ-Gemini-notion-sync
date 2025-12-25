@@ -1,5 +1,32 @@
-// [background.js] 입력/출력 설명 포함 버전
+// [background.js] 수식(LaTeX) 렌더링 지원 버전
 
+// 1. [NEW] 텍스트를 분석해서 수식과 일반 글자로 나누는 함수
+function createRichText(text) {
+  if (!text) return [];
+
+  // 백준의 수식은 \( ... \) 로 감싸져 있음. 이걸 기준으로 쪼갭니다.
+  // 예: "자연수 \(N\)이 주어진다" -> ["자연수 ", "\(N\)", "이 주어진다"]
+  const tokens = text.split(/(\\\(.*?\\\))/g);
+
+  return tokens.map((token) => {
+    // 수식인 경우 ( \( 로 시작하고 \) 로 끝나는 경우 )
+    if (token.startsWith("\\(") && token.endsWith("\\)")) {
+      const expression = token.slice(2, -2); // 앞뒤 \(, \) 제거
+      return {
+        type: "equation",
+        equation: { expression: expression },
+      };
+    } else {
+      // 일반 텍스트인 경우
+      return {
+        type: "text",
+        text: { content: token },
+      };
+    }
+  });
+}
+
+// 언어 변환 함수
 function mapBojLangToNotion(bojLang) {
   const lang = bojLang.toLowerCase();
   if (lang.includes("node")) return "javascript";
@@ -10,6 +37,7 @@ function mapBojLangToNotion(bojLang) {
   return "plain text";
 }
 
+// 텍스트 청소 유틸
 function cleanText(text) {
   if (!text) return "";
   let str = String(text);
@@ -34,42 +62,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function processRequest(data) {
-  // problemInput, problemOutput 추가됨
   const { code, title, problemId, desc, problemInput, problemOutput, input, output, language } = data;
 
   const notionLang = mapBojLangToNotion(language);
-
   const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
+
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) {
     throw new Error("API 키를 먼저 설정해주세요.");
   }
 
+  // 1. Gemini 분석 (가장 안정적인 모델 사용)
   // 1. Gemini 분석
+
   const prompt = `
       너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
-      2. "analysis"는 3~5문장의 리스트(Array).
+      2. "analysis"는 1000자 이내로 작성해줘.
       3. 첫 문장은 핵심 요약, 이후는 단계별 설명.
       4. 구어체 사용("~했습니다").
       5. 마크다운 기호(**, \`) 절대 금지.
       6. JSON 예시: {"analysis": ["BFS 문제입니다.", "큐를 썼습니다."], "tags": ["BFS"]}
-      
+      7. tags는 알고리즘 유형 키워드로 하고 한글태그로.
       코드:
       ${code}
     `;
 
-  // gemini-3-flash 로 변경
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=${keys.geminiKey}`;
+  // [중요] 사용 가능한 모델로 변경 (2.5-flash-lite)
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${keys.geminiKey}`;
+
   const geminiRes = await fetch(geminiUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
   });
 
-  const geminiJson = await geminiRes.json();
-  if (!geminiJson.candidates) throw new Error("Gemini 응답 에러");
+  if (!geminiRes.ok) {
+    const errData = await geminiRes.json();
+    throw new Error(`Gemini 오류: ${errData.error?.message || "알 수 없는 에러"}`);
+  }
 
+  const geminiJson = await geminiRes.json();
   const resText = geminiJson.candidates[0].content.parts[0].text;
   const jsonStr = resText
     .replace(/```json/g, "")
@@ -87,29 +120,40 @@ async function processRequest(data) {
   // 2. 노션 블록 조립
   const childrenBlocks = [];
 
-  // [A] 문제 정보 (토글) - 여기에 입력/출력 설명 추가!
+  // [A] 문제 정보 (토글) - 여기에서 createRichText 함수를 사용합니다!
   childrenBlocks.push({
     object: "block",
     type: "toggle",
     toggle: {
       rich_text: [{ text: { content: `📂 문제 정보: ${title} (Click)` } }],
       children: [
-        // 1. 문제 본문
-        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: desc.substring(0, 1500) } }] } },
+        // 1. 문제 본문 (수식 적용)
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: { rich_text: createRichText(desc.substring(0, 1500)) },
+        },
 
-        // [NEW] 2. 입력 설명
+        // 2. 입력 설명 (수식 적용)
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "입력" } }] } },
-        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: problemInput.substring(0, 1000) } }] } },
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: { rich_text: createRichText(problemInput.substring(0, 1000)) },
+        },
 
-        // [NEW] 3. 출력 설명
+        // 3. 출력 설명 (수식 적용)
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "출력" } }] } },
-        { object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: problemOutput.substring(0, 1000) } }] } },
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) },
+        },
 
-        // 4. 예제 입력
+        // 4. 예제 (얘네는 그냥 텍스트/코드로 유지)
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 입력 1" } }] } },
         { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
 
-        // 5. 예제 출력
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 출력 1" } }] } },
         { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: output.substring(0, 1000) } }] } },
       ],
@@ -126,17 +170,20 @@ async function processRequest(data) {
   const analysisList = analysisData.analysis || ["분석 내용 없음"];
   analysisList.forEach((line, index) => {
     const cleaned = cleanText(line);
+    // AI 분석 내용에도 혹시 수식이 있을 수 있으니 createRichText 적용
+    const richContent = createRichText(cleaned);
+
     if (index === 0) {
       childrenBlocks.push({
         object: "block",
         type: "quote",
-        quote: { rich_text: [{ text: { content: cleaned } }] },
+        quote: { rich_text: richContent },
       });
     } else {
       childrenBlocks.push({
         object: "block",
         type: "bulleted_list_item",
-        bulleted_list_item: { rich_text: [{ text: { content: cleaned } }] },
+        bulleted_list_item: { rich_text: richContent },
       });
     }
   });
