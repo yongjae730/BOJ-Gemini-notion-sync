@@ -1,9 +1,7 @@
-// [content.js] 2차원 배열 강력 줄바꿈(<pre>) + 영구 기억 + 언어 감지
-
 let isProcessing = false;
 const processedSubmissions = new Set();
 
-// 1. [기억 기능] 저장소에서 이미 처리한 목록 불러오기
+// 1. 기억 기능
 chrome.storage.local.get(["processedList"], (result) => {
   if (result.processedList) {
     result.processedList.forEach((id) => processedSubmissions.add(id));
@@ -18,7 +16,6 @@ function showToast(message, type = "info") {
 
   const toast = document.createElement("div");
   toast.id = "boj-notion-toast";
-
   toast.style.position = "fixed";
   toast.style.top = "20px";
   toast.style.right = "20px";
@@ -45,7 +42,6 @@ function showToast(message, type = "info") {
   }
 
   document.body.appendChild(toast);
-
   if (type !== "info") {
     setTimeout(() => {
       toast.style.opacity = "0";
@@ -54,50 +50,50 @@ function showToast(message, type = "info") {
   }
 }
 
-// 3. [핵심 수정] 표(Table)를 <pre> 태그로 변환 (줄바꿈 강제 적용)
+// 3. 표(Table) -> <pre> 변환
 function convertTablesToText(element) {
   if (!element) return;
-
   const tables = element.querySelectorAll("table");
   tables.forEach((table) => {
-    let tableText = ""; // 문자열로 누적
+    let tableText = "";
     const rows = table.querySelectorAll("tr");
-
     rows.forEach((row) => {
       let rowParts = [];
       const cells = row.querySelectorAll("td, th");
-      cells.forEach((cell) => {
-        rowParts.push(cell.innerText.trim());
-      });
-      // 행 데이터 + 줄바꿈(\n) 명시적 추가
+      cells.forEach((cell) => rowParts.push(cell.innerText.trim()));
       tableText += rowParts.join("  ") + "\n";
     });
-
-    // <pre> 태그 생성: 이 태그 안의 \n은 브라우저가 절대 무시하지 않음
     const pre = document.createElement("pre");
-    pre.style.margin = "10px 0"; // 보기 좋게 여백
-    pre.style.fontFamily = "monospace"; // 고정폭 글꼴 (줄 맞춤)
-    pre.textContent = tableText; // 텍스트 삽입
-
+    pre.style.margin = "10px 0";
+    pre.style.fontFamily = "monospace";
+    pre.textContent = tableText;
     table.replaceWith(pre);
   });
 }
 
-// 4. 채점 현황 감지
+// 4. 코드 블록(<pre>) -> 마크다운(```) 변환
+function convertPresToBackticks(element) {
+  if (!element) return;
+  const pres = element.querySelectorAll("pre");
+  pres.forEach((pre) => {
+    if (!pre.style.fontFamily) {
+      pre.innerText = "\n```\n" + pre.innerText.trim() + "\n```\n";
+    }
+  });
+}
+
+// 5. 채점 현황 감지
 const observer = new MutationObserver((mutations) => {
   if (isProcessing) return;
-
   const rows = document.querySelectorAll("#status-table tbody tr");
   if (rows.length === 0) return;
 
   const firstRow = rows[0];
   const submitId = firstRow.id.replace("solution-", "");
 
-  // [기억 기능]
   if (processedSubmissions.has(submitId)) return;
 
   const resultCell = firstRow.querySelector(".result-text");
-
   if (resultCell && resultCell.innerText.includes("맞았습니다")) {
     isProcessing = true;
     processedSubmissions.add(submitId);
@@ -106,7 +102,6 @@ const observer = new MutationObserver((mutations) => {
     showToast(`정답! (${langText}) 분석을 시작합니다...`, "info");
 
     const problemId = firstRow.querySelector('a[href^="/problem/"]').innerText;
-
     startProcess(submitId, problemId, langText);
   }
 });
@@ -116,7 +111,7 @@ if (targetNode) {
   observer.observe(targetNode, { childList: true, subtree: true });
 }
 
-// 5. 데이터 수집
+// 6. 데이터 수집
 async function startProcess(submitId, problemId, language) {
   try {
     const sourceRes = await fetch(`https://www.acmicpc.net/source/${submitId}`);
@@ -130,22 +125,28 @@ async function startProcess(submitId, problemId, language) {
     const problemDoc = parser.parseFromString(problemHtml, "text/html");
 
     const titleElement = problemDoc.querySelector("#problem_title");
-    const realTitle = titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`;
-    const fullTitle = `${problemId}번: ${realTitle}`;
+    const fullTitle = `${problemId}번: ${titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`}`;
 
-    // [표 해결] 가져오기 전에 표 변환 수행!
+    // [NEW] 백준 '알고리즘 분류' 태그 직접 가져오기
+    // 보통 href="/problem/tag/..." 형태의 링크로 되어 있음
+    const tagElements = problemDoc.querySelectorAll('a[href^="/problem/tag/"]');
+    const problemTags = Array.from(tagElements).map((el) => el.innerText.trim());
+
+    // 요소 선택
     const descEl = problemDoc.querySelector("#problem_description");
     const inputEl = problemDoc.querySelector("#problem_input");
     const outputEl = problemDoc.querySelector("#problem_output");
+    const hintEl = problemDoc.querySelector("#problem_hint");
 
-    convertTablesToText(descEl);
-    convertTablesToText(inputEl);
-    convertTablesToText(outputEl);
+    [descEl, inputEl, outputEl, hintEl].forEach((el) => {
+      convertTablesToText(el);
+      convertPresToBackticks(el);
+    });
 
-    // <pre> 변환 후 innerText를 가져오면 줄바꿈이 유지됨
     const description = descEl?.innerText.trim() || "내용 없음";
     const problemInput = inputEl?.innerText.trim() || "입력 설명 없음";
     const problemOutput = outputEl?.innerText.trim() || "출력 설명 없음";
+    const problemHint = hintEl?.innerText.trim() || "";
 
     const inputEx = problemDoc.querySelector("#sample-input-1")?.innerText.trim() || "없음";
     const outputEx = problemDoc.querySelector("#sample-output-1")?.innerText.trim() || "없음";
@@ -160,14 +161,16 @@ async function startProcess(submitId, problemId, language) {
           desc: description,
           problemInput,
           problemOutput,
+          problemHint,
           input: inputEx,
           output: outputEx,
           language,
+          tags: problemTags, // [중요] 직접 긁은 태그를 보냄
         },
       },
       (response) => {
         if (response.success) {
-          showToast(`"${realTitle}" 저장 완료!`, "success");
+          showToast(`"${fullTitle}" 저장 완료!`, "success");
           chrome.storage.local.set({ processedList: Array.from(processedSubmissions) });
         } else {
           showToast("실패: " + (response.error || "오류"), "error");
