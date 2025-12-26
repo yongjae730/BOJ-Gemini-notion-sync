@@ -1,39 +1,27 @@
-// 1. [핵심] 텍스트를 분석해서 수식과 일반 글자로 나누는 함수
+// 텍스트 분석
 function createRichText(text) {
   if (!text) return [];
 
-  // 변경 전: /(\\\(.*?\\\))/g  <-- \( ... \) 만 찾음
-  // 변경 후: /(\\\(.*?\\\)|(?:\$[^\$]+?\$))/g  <-- \( ... \) 또는 $ ... $ 모두 찾음
-  const tokens = text.split(/(\\\(.*?\\\)|(?:\$[^\$]+?\$))/g);
+  const tokens = text.split(/(\\\(.*?\\\)|(?:\$[^\$]+?\$)|(?:```[\s\S]*?```))/g);
 
   return tokens.map((token) => {
-    // A. \( ... \) 스타일 수식
     if (token.startsWith("\\(") && token.endsWith("\\)")) {
-      const expression = token.slice(2, -2); // 앞뒤 \(, \) 제거
-      return {
-        type: "equation",
-        equation: { expression: expression },
-      };
-    }
-    // B. $ ... $ 스타일 수식 (이번에 추가된 부분!)
-    else if (token.startsWith("$") && token.endsWith("$") && token.length > 2) {
-      const expression = token.slice(1, -1); // 앞뒤 $, $ 제거
-      return {
-        type: "equation",
-        equation: { expression: expression },
-      };
-    }
-    // C. 일반 텍스트
-    else {
+      return { type: "equation", equation: { expression: token.slice(2, -2) } };
+    } else if (token.startsWith("$") && token.endsWith("$") && token.length > 2) {
+      return { type: "equation", equation: { expression: token.slice(1, -1) } };
+    } else if (token.startsWith("```") && token.endsWith("```")) {
+      const content = token.slice(3, -3).trim();
       return {
         type: "text",
-        text: { content: token },
+        text: { content: content },
+        annotations: { code: true, color: "red" },
       };
+    } else {
+      return { type: "text", text: { content: token } };
     }
   });
 }
 
-// 언어 변환 함수
 function mapBojLangToNotion(bojLang) {
   const lang = bojLang.toLowerCase();
   if (lang.includes("node")) return "javascript";
@@ -44,15 +32,10 @@ function mapBojLangToNotion(bojLang) {
   return "plain text";
 }
 
-// 텍스트 청소 유틸
 function cleanText(text) {
   if (!text) return "";
-  let str = String(text);
-  str = str.replace(/`/g, "");
-  str = str.replace(/\*\*/g, "");
-  str = str.replace(/__/g, "");
-  str = str.replace(/^\s*[-*]\s+/gm, "");
-  str = str.replace(/^\s*\d+\.\s+/gm, "");
+  let str = String(text).replace(/`/g, "").replace(/\*\*/g, "").replace(/__/g, "");
+  str = str.replace(/^\s*[-*]\s+/gm, "").replace(/^\s*\d+\.\s+/gm, "");
   return str.trim();
 }
 
@@ -69,29 +52,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function processRequest(data) {
-  const { code, title, problemId, desc, problemInput, problemOutput, input, output, language } = data;
-
+  // tags: content.js가 긁어온 진짜 백준 태그
+  const { code, title, problemId, desc, problemInput, problemOutput, problemHint, input, output, language, tags } = data;
   const notionLang = mapBojLangToNotion(language);
   const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
 
-  if (!keys.geminiKey || !keys.notionToken || !keys.dbId) {
-    throw new Error("API 키를 먼저 설정해주세요.");
-  }
+  if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
 
-  // 1. Gemini 분석
+  // [변경] Gemini 프롬프트: 태그 분석 요청 삭제 (어차피 백준 거 쓸 거니까)
   const prompt = `
       너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
       2. "analysis"는 3~5문장의 리스트(Array).
       3. 첫 문장은 핵심 요약.
-      4. JSON 예시: {"analysis": ["BFS 문제입니다."], "tags": ["BFS"]}
-      
-      코드:
-      ${code}
+      4. JSON 예시: {"analysis": ["BFS를 이용한 최단거리 문제입니다.", "큐를 사용하여..."]}
+      코드: ${code}
     `;
 
-  // 모델 URL (Lite 버전 사용)
   const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${keys.geminiKey}`;
 
   const geminiRes = await fetch(geminiUrl, {
@@ -107,112 +85,73 @@ async function processRequest(data) {
 
   const geminiJson = await geminiRes.json();
   const resText = geminiJson.candidates[0].content.parts[0].text;
-  const jsonStr = resText
+  const match = resText
     .replace(/```json/g, "")
     .replace(/```/g, "")
-    .trim();
-  const match = jsonStr.match(/\{[\s\S]*\}/);
-
-  let analysisData = { analysis: ["분석 실패"], tags: [] };
+    .trim()
+    .match(/\{[\s\S]*\}/);
+  let analysisData = { analysis: ["분석 실패"] };
   if (match) {
     try {
       analysisData = JSON.parse(match[0]);
     } catch (e) {}
   }
 
-  // 2. 노션 블록 조립
+  // 노션 블록 조립
   const childrenBlocks = [];
+  const problemInfoChildren = [
+    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(desc.substring(0, 1500)) } },
+    { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "입력" } }] } },
+    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemInput.substring(0, 1000)) } },
+    { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "출력" } }] } },
+    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) } },
+  ];
 
-  // [A] 문제 정보 (토글)
+  if (problemHint && problemHint.length > 0) {
+    problemInfoChildren.push({ object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "힌트" } }] } });
+    problemInfoChildren.push({ object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemHint.substring(0, 1000)) } });
+  }
+
+  problemInfoChildren.push(
+    { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 입력 1" } }] } },
+    { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
+    { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 출력 1" } }] } },
+    { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: output.substring(0, 1000) } }] } }
+  );
+
   childrenBlocks.push({
     object: "block",
     type: "toggle",
     toggle: {
       rich_text: [{ text: { content: `📂 문제 정보: ${title} (Click)` } }],
-      children: [
-        // 1. 문제 본문 (수식 적용)
-        {
-          object: "block",
-          type: "paragraph",
-          paragraph: { rich_text: createRichText(desc.substring(0, 1500)) },
-        },
-
-        // 2. 입력 설명 (수식 적용)
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "입력" } }] } },
-        {
-          object: "block",
-          type: "paragraph",
-          paragraph: { rich_text: createRichText(problemInput.substring(0, 1000)) },
-        },
-
-        // 3. 출력 설명 (수식 적용)
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "출력" } }] } },
-        {
-          object: "block",
-          type: "paragraph",
-          paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) },
-        },
-
-        // 4. 예제
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 입력 1" } }] } },
-        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
-
-        { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 출력 1" } }] } },
-        { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: output.substring(0, 1000) } }] } },
-      ],
+      children: problemInfoChildren,
     },
   });
 
-  // [B] AI 분석
-  childrenBlocks.push({
-    object: "block",
-    type: "heading_2",
-    heading_2: { rich_text: [{ text: { content: "💡 풀이 전략" } }] },
-  });
+  childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: "💡 풀이 전략" } }] } });
 
   const analysisList = analysisData.analysis || ["분석 내용 없음"];
   analysisList.forEach((line, index) => {
-    const cleaned = cleanText(line);
-    const richContent = createRichText(cleaned);
-
-    if (index === 0) {
-      childrenBlocks.push({
-        object: "block",
-        type: "quote",
-        quote: { rich_text: richContent },
-      });
-    } else {
-      childrenBlocks.push({
-        object: "block",
-        type: "bulleted_list_item",
-        bulleted_list_item: { rich_text: richContent },
-      });
-    }
+    const richContent = createRichText(cleanText(line));
+    if (index === 0) childrenBlocks.push({ object: "block", type: "quote", quote: { rich_text: richContent } });
+    else childrenBlocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: richContent } });
   });
 
-  // [C] 내 코드
-  childrenBlocks.push({
-    object: "block",
-    type: "heading_2",
-    heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] },
-  });
-
+  childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] } });
   for (let i = 0; i < code.length; i += 2000) {
     childrenBlocks.push({
       object: "block",
       type: "code",
-      code: {
-        language: notionLang,
-        rich_text: [{ text: { content: code.substring(i, i + 2000) } }],
-      },
+      code: { language: notionLang, rich_text: [{ text: { content: code.substring(i, i + 2000) } }] },
     });
   }
 
-  // 3. 노션 전송
   const today = new Date().toISOString().split("T")[0];
-  const tags = (analysisData.tags || []).map((tag) => ({ name: tag }));
 
-  const notionRes = await fetch("https://api.notion.com/v1/pages", {
+  // [중요] AI 태그 대신 content.js가 보낸 진짜 태그(tags) 사용
+  const finalTags = (tags || []).map((tag) => ({ name: tag }));
+
+  const notionRes = await fetch("[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${keys.notionToken}`,
@@ -224,7 +163,7 @@ async function processRequest(data) {
       properties: {
         이름: { title: [{ text: { content: title } }] },
         날짜: { date: { start: today } },
-        알고리즘: { multi_select: tags },
+        알고리즘: { multi_select: finalTags }, // 백준 태그 적용
       },
       children: childrenBlocks,
     }),
