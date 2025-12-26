@@ -1,23 +1,30 @@
-// [background.js] 수식(LaTeX) 렌더링 지원 버전
-
-// 1. [NEW] 텍스트를 분석해서 수식과 일반 글자로 나누는 함수
+// 1. [핵심] 텍스트를 분석해서 수식과 일반 글자로 나누는 함수
 function createRichText(text) {
   if (!text) return [];
 
-  // 백준의 수식은 \( ... \) 로 감싸져 있음. 이걸 기준으로 쪼갭니다.
-  // 예: "자연수 \(N\)이 주어진다" -> ["자연수 ", "\(N\)", "이 주어진다"]
-  const tokens = text.split(/(\\\(.*?\\\))/g);
+  // 변경 전: /(\\\(.*?\\\))/g  <-- \( ... \) 만 찾음
+  // 변경 후: /(\\\(.*?\\\)|(?:\$[^\$]+?\$))/g  <-- \( ... \) 또는 $ ... $ 모두 찾음
+  const tokens = text.split(/(\\\(.*?\\\)|(?:\$[^\$]+?\$))/g);
 
   return tokens.map((token) => {
-    // 수식인 경우 ( \( 로 시작하고 \) 로 끝나는 경우 )
+    // A. \( ... \) 스타일 수식
     if (token.startsWith("\\(") && token.endsWith("\\)")) {
       const expression = token.slice(2, -2); // 앞뒤 \(, \) 제거
       return {
         type: "equation",
         equation: { expression: expression },
       };
-    } else {
-      // 일반 텍스트인 경우
+    }
+    // B. $ ... $ 스타일 수식 (이번에 추가된 부분!)
+    else if (token.startsWith("$") && token.endsWith("$") && token.length > 2) {
+      const expression = token.slice(1, -1); // 앞뒤 $, $ 제거
+      return {
+        type: "equation",
+        equation: { expression: expression },
+      };
+    }
+    // C. 일반 텍스트
+    else {
       return {
         type: "text",
         text: { content: token },
@@ -71,24 +78,20 @@ async function processRequest(data) {
     throw new Error("API 키를 먼저 설정해주세요.");
   }
 
-  // 1. Gemini 분석 (가장 안정적인 모델 사용)
   // 1. Gemini 분석
-
   const prompt = `
       너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
-      2. "analysis"는 1000자 이내로 작성해줘.
-      3. 첫 문장은 핵심 요약, 이후는 단계별 설명.
-      4. 구어체 사용("~했습니다").
-      5. 마크다운 기호(**, \`) 절대 금지.
-      6. JSON 예시: {"analysis": ["BFS 문제입니다.", "큐를 썼습니다."], "tags": ["BFS"]}
-      7. tags는 알고리즘 유형 키워드로 하고 한글태그로.
+      2. "analysis"는 3~5문장의 리스트(Array).
+      3. 첫 문장은 핵심 요약.
+      4. JSON 예시: {"analysis": ["BFS 문제입니다."], "tags": ["BFS"]}
+      
       코드:
       ${code}
     `;
 
-  // [중요] 사용 가능한 모델로 변경 (2.5-flash-lite)
+  // 모델 URL (Lite 버전 사용)
   const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${keys.geminiKey}`;
 
   const geminiRes = await fetch(geminiUrl, {
@@ -120,7 +123,7 @@ async function processRequest(data) {
   // 2. 노션 블록 조립
   const childrenBlocks = [];
 
-  // [A] 문제 정보 (토글) - 여기에서 createRichText 함수를 사용합니다!
+  // [A] 문제 정보 (토글)
   childrenBlocks.push({
     object: "block",
     type: "toggle",
@@ -150,7 +153,7 @@ async function processRequest(data) {
           paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) },
         },
 
-        // 4. 예제 (얘네는 그냥 텍스트/코드로 유지)
+        // 4. 예제
         { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "예제 입력 1" } }] } },
         { object: "block", type: "code", code: { language: "plain text", rich_text: [{ text: { content: input.substring(0, 1000) } }] } },
 
@@ -170,7 +173,6 @@ async function processRequest(data) {
   const analysisList = analysisData.analysis || ["분석 내용 없음"];
   analysisList.forEach((line, index) => {
     const cleaned = cleanText(line);
-    // AI 분석 내용에도 혹시 수식이 있을 수 있으니 createRichText 적용
     const richContent = createRichText(cleaned);
 
     if (index === 0) {
