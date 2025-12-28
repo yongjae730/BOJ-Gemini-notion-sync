@@ -77,7 +77,7 @@ async function processRequest(data) {
 
       [작성 가이드]
       1. **접근 방법 (Why)**: 문제 유형을 파악하고, **"왜 이 알고리즘을 선택했는지"**에 대한 나의 판단 근거를 적으세요.
-      2. **풀이 로직 (How)**: 코드의 흐름을 내가 다시 봐도 이해하기 쉽게 단계별로 요약하세요.
+      2. **풀이 로직 (How)**: 코드의 흐름을 내가 다시 봐도 이해하기 쉽게 단계별로 요약하세요. 그렇다고 너무 장황하지 않게 핵심 위주로 작성하세요.
       3. **복잡도 분석**: 면접 대비용으로 시간/공간 복잡도(Big-O)를 분석하고, 효율적인지 스스로 평가하세요.
       4. **회고/배운 점**: 풀면서 막혔던 부분이나, 이 문제에서 얻어간 핵심 개념을 짧게 짚으세요.
 
@@ -173,10 +173,33 @@ async function processRequest(data) {
   childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: "💡 풀이 전략" } }] } });
 
   const analysisList = analysisData.analysis || ["분석 내용 없음"];
-  analysisList.forEach((line, index) => {
-    const richContent = createRichText(cleanText(line));
-    if (index === 0) childrenBlocks.push({ object: "block", type: "quote", quote: { rich_text: richContent } });
-    else childrenBlocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: richContent } });
+  analysisList.forEach((line) => {
+    const rawText = line.trim();
+
+    // 1. 빈 줄이거나, AI가 가끔 내뱉는 "리스트", "목록" 같은 불필요한 텍스트는 아예 블록 생성을 안 함 (점 생성 방지)
+    if (!rawText || rawText === "리스트" || rawText === "목록") return;
+
+    // 2. 제목 판별 로직: "**"로 시작하거나, 특정 이모지가 포함된 짧은 문장
+    const isHeader =
+      rawText.startsWith("**") || (rawText.length < 30 && (rawText.includes("💡") || rawText.includes("📝") || rawText.includes("⏳") || rawText.includes("🚀") || rawText.includes("회고")));
+
+    const richContent = createRichText(cleanText(rawText));
+
+    if (isHeader) {
+      // 제목인 경우: Heading 3 (점이 없고 글씨가 큼)
+      childrenBlocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: richContent },
+      });
+    } else {
+      // 본문인 경우: Bulleted List Item (점이 찍힘)
+      childrenBlocks.push({
+        object: "block",
+        type: "bulleted_list_item",
+        bulleted_list_item: { rich_text: richContent },
+      });
+    }
   });
 
   childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] } });
