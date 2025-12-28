@@ -42,7 +42,7 @@ function showToast(message, type = "info") {
   }
 
   document.body.appendChild(toast);
-  if (type !== "info") {
+  if (type === "success") {
     setTimeout(() => {
       toast.style.opacity = "0";
       setTimeout(() => toast.remove(), 500);
@@ -171,18 +171,21 @@ async function startProcess(submitId, problemId, language) {
       (response) => {
         if (response.success) {
           showToast(`"${fullTitle}" 저장 완료!`, "success");
+          // 성공했을 때만 영구 저장소(storage)에 업데이트
           chrome.storage.local.set({ processedList: Array.from(processedSubmissions) });
         } else {
-          showToast("실패: " + (response.error || "오류"), "error");
-          processedSubmissions.delete(submitId);
+          // [수정] 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
+          showToast(`실패: ${response.error || "오류"}\n(새로고침하면 다시 시도합니다)`, "error");
+          // processedSubmissions.delete(submitId);  <-- 이 줄을 삭제
         }
         isProcessing = false;
       }
     );
   } catch (e) {
     console.error("수집 실패:", e);
-    showToast("데이터 수집 중 오류 발생", "error");
+    // [수정] 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
+    showToast("데이터 수집 중 오류 발생\n(새로고침하면 다시 시도합니다)", "error");
     isProcessing = false;
-    processedSubmissions.delete(submitId);
+    // processedSubmissions.delete(submitId); <-- 이 줄을 삭제
   }
 }

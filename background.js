@@ -69,15 +69,20 @@ async function processRequest(data) {
 
   // Gemini 요청
   const prompt = `
-      너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
+      너는 취업을 준비하는 중인 취준생이야. 아래 **${language}** 코드를 분석해줘.
+      너는 이력서 작성란에 알고리즘 공부한 노션 링크를 첨부할 예정이야.
+      보통은 블로그로 작성하지만 노션을 사용하고 있어.
+      그래서 너는 너의 코드가 어떤 유형의 알고리즘 문제인지, 어떤 풀이 전략을 사용했는지 분석한 내용을 싣기 위해 노력해야 해.
+      아래 규칙을 따라 작성해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
-      2. "analysis"는 3~5문장의 리스트(Array).
-      3. 첫 문장은 핵심 요약.
+      2. "analysis"는 1000자 이내로 작성해줘.
+      3. 첫 문장은 핵심 요약, 이후는 단계별 설명.
+      4. JSON 예시: {"analysis": ["BFS 문제입니다.", "큐를 썼습니다."], "tags": ["BFS"]}
       코드: ${code}
     `;
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${keys.geminiKey}`;
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keys.geminiKey}`;
 
   const geminiRes = await fetch(geminiUrl, {
     method: "POST",
