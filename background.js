@@ -1,3 +1,5 @@
+// [background.js] URL 문법 오류 수정 완료
+
 // 텍스트 분석
 function createRichText(text) {
   if (!text) return [];
@@ -52,21 +54,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function processRequest(data) {
-  // tags: content.js가 긁어온 진짜 백준 태그
   const { code, title, problemId, desc, problemInput, problemOutput, problemHint, input, output, language, tags } = data;
   const notionLang = mapBojLangToNotion(language);
-  const keys = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
+
+  // 키 가져오기 + [안전장치] 공백 제거(.trim)
+  const storageData = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
+  const keys = {
+    geminiKey: storageData.geminiKey ? storageData.geminiKey.trim() : "",
+    notionToken: storageData.notionToken ? storageData.notionToken.trim() : "",
+    dbId: storageData.dbId ? storageData.dbId.trim() : "",
+  };
 
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
 
-  // [변경] Gemini 프롬프트: 태그 분석 요청 삭제 (어차피 백준 거 쓸 거니까)
+  // Gemini 요청
   const prompt = `
       너는 알고리즘 멘토야. 아래 **${language}** 코드를 분석해줘.
       [규칙]
       1. 결과는 반드시 순수한 JSON.
       2. "analysis"는 3~5문장의 리스트(Array).
       3. 첫 문장은 핵심 요약.
-      4. JSON 예시: {"analysis": ["BFS를 이용한 최단거리 문제입니다.", "큐를 사용하여..."]}
       코드: ${code}
     `;
 
@@ -90,6 +97,7 @@ async function processRequest(data) {
     .replace(/```/g, "")
     .trim()
     .match(/\{[\s\S]*\}/);
+
   let analysisData = { analysis: ["분석 실패"] };
   if (match) {
     try {
@@ -147,11 +155,10 @@ async function processRequest(data) {
   }
 
   const today = new Date().toISOString().split("T")[0];
-
-  // [중요] AI 태그 대신 content.js가 보낸 진짜 태그(tags) 사용
   const finalTags = (tags || []).map((tag) => ({ name: tag }));
 
-  const notionRes = await fetch("[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)", {
+  // [수정 완료] URL에서 불필요한 괄호 [] () 제거함
+  const notionRes = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${keys.notionToken}`,
@@ -163,7 +170,7 @@ async function processRequest(data) {
       properties: {
         이름: { title: [{ text: { content: title } }] },
         날짜: { date: { start: today } },
-        알고리즘: { multi_select: finalTags }, // 백준 태그 적용
+        알고리즘: { multi_select: finalTags },
       },
       children: childrenBlocks,
     }),
