@@ -203,13 +203,23 @@ async function processRequest(data) {
   });
 
   childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] } });
+
+  // [수정 핵심] 코드를 2000자씩 잘라서 '하나의 블록' 안에 '여러 개의 텍스트 덩어리'로 넣기
+  const codeChunks = [];
   for (let i = 0; i < code.length; i += 2000) {
-    childrenBlocks.push({
-      object: "block",
-      type: "code",
-      code: { language: notionLang, rich_text: [{ text: { content: code.substring(i, i + 2000) } }] },
+    codeChunks.push({
+      text: { content: code.substring(i, i + 2000) },
     });
   }
+
+  childrenBlocks.push({
+    object: "block",
+    type: "code",
+    code: {
+      language: notionLang,
+      rich_text: codeChunks, // 배열 전체를 넣으면 하나로 합쳐짐
+    },
+  });
 
   const today = new Date().toISOString().split("T")[0];
   const finalTags = (tags || []).map((tag) => ({ name: tag }));
