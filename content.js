@@ -127,7 +127,7 @@ async function startProcess(submitId, problemId, language) {
     const titleElement = problemDoc.querySelector("#problem_title");
     const fullTitle = `${problemId}번: ${titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`}`;
 
-    // [NEW] 백준 '알고리즘 분류' 태그 직접 가져오기
+    // 백준 '알고리즘 분류' 태그 직접 가져오기
     // 보통 href="/problem/tag/..." 형태의 링크로 되어 있음
     const tagElements = problemDoc.querySelectorAll('a[href^="/problem/tag/"]');
     const problemTags = Array.from(tagElements).map((el) => el.innerText.trim());
@@ -165,7 +165,7 @@ async function startProcess(submitId, problemId, language) {
           input: inputEx,
           output: outputEx,
           language,
-          tags: problemTags, // [중요] 직접 긁은 태그를 보냄
+          tags: problemTags,
         },
       },
       (response) => {
@@ -174,18 +174,16 @@ async function startProcess(submitId, problemId, language) {
           // 성공했을 때만 영구 저장소(storage)에 업데이트
           chrome.storage.local.set({ processedList: Array.from(processedSubmissions) });
         } else {
-          // [수정] 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
+          // 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
           showToast(`실패: ${response.error || "오류"}\n(새로고침하면 다시 시도합니다)`, "error");
-          // processedSubmissions.delete(submitId);  <-- 이 줄을 삭제
         }
         isProcessing = false;
       }
     );
   } catch (e) {
     console.error("수집 실패:", e);
-    // [수정] 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
+    // 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
     showToast("데이터 수집 중 오류 발생\n(새로고침하면 다시 시도합니다)", "error");
     isProcessing = false;
-    // processedSubmissions.delete(submitId); <-- 이 줄을 삭제
   }
 }

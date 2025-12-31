@@ -1,5 +1,3 @@
-// [background.js] URL 문법 오류 수정 완료
-
 // 텍스트 분석
 function createRichText(text) {
   if (!text) return [];
@@ -52,12 +50,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
-
 async function processRequest(data) {
   const { code, title, problemId, desc, problemInput, problemOutput, problemHint, input, output, language, tags } = data;
   const notionLang = mapBojLangToNotion(language);
 
-  // 키 가져오기 + [안전장치] 공백 제거(.trim)
+  // 키 가져오기
   const storageData = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
   const keys = {
     geminiKey: storageData.geminiKey ? storageData.geminiKey.trim() : "",
@@ -65,6 +62,19 @@ async function processRequest(data) {
     dbId: storageData.dbId ? storageData.dbId.trim() : "",
   };
 
+  if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
+
+  // 1.티어 정보를 직접 가져옵니다
+  let tierName = "Unrated";
+  try {
+    const solvedRes = await fetch(`https://solved.ac/api/v3/problem/show?problemId=${problemId}`);
+    if (solvedRes.ok) {
+      const solvedData = await solvedRes.json();
+      tierName = convertTier(solvedData.level); // 아래에 추가할 함수 사용
+    }
+  } catch (e) {
+    console.log("Tier fetch failed:", e);
+  }
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
 
   // Gemini 요청
@@ -204,7 +214,7 @@ async function processRequest(data) {
 
   childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] } });
 
-  // [수정 핵심] 코드를 2000자씩 잘라서 '하나의 블록' 안에 '여러 개의 텍스트 덩어리'로 넣기
+  // 코드를 2000자씩 잘라서 '하나의 블록' 안에 '여러 개의 텍스트 덩어리'로 넣기
   const codeChunks = [];
   for (let i = 0; i < code.length; i += 2000) {
     codeChunks.push({
@@ -224,7 +234,7 @@ async function processRequest(data) {
   const today = new Date().toISOString().split("T")[0];
   const finalTags = (tags || []).map((tag) => ({ name: tag }));
 
-  // [수정 완료] URL에서 불필요한 괄호 [] () 제거함
+  // ▼▼▼ [properties 부분 수정] ▼▼▼
   const notionRes = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
@@ -238,13 +248,22 @@ async function processRequest(data) {
         이름: { title: [{ text: { content: title } }] },
         날짜: { date: { start: today } },
         알고리즘: { multi_select: finalTags },
+
+        // data.tier 대신, 방금 background에서 직접 구한 tierName을 사용
+        난이도: { select: { name: tierName } },
+        언어: { select: { name: data.language || "Unknown" } },
       },
       children: childrenBlocks,
     }),
   });
+}
+function convertTier(level) {
+  if (level === 0 || !level) return "Unrated";
 
-  if (!notionRes.ok) {
-    const err = await notionRes.json();
-    throw new Error(`노션 전송 실패: ${err.message}`);
-  }
+  const tiers = ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ruby"];
+  const index = Math.floor((level - 1) / 5);
+  const step = 5 - ((level - 1) % 5);
+
+  if (index >= tiers.length) return "Master";
+  return `${tiers[index]} ${step}`;
 }

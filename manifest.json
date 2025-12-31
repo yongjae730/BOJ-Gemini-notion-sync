@@ -3,7 +3,7 @@
   "name": "백준 AI 노션 자동 업로드",
   "version": "2.0",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://generativelanguage.googleapis.com/*", "https://api.notion.com/*", "https://www.acmicpc.net/*"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*", "https://api.notion.com/*", "https://www.acmicpc.net/*", "https://solved.ac/*"],
   "content_scripts": [
     {
       "matches": ["https://www.acmicpc.net/status*"],
