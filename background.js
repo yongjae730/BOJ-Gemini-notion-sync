@@ -50,11 +50,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
 async function processRequest(data) {
-  const { code, title, problemId, desc, problemInput, problemOutput, problemHint, input, output, language, tags } = data;
+  // desc가 없을 경우를 대비해 기본값 "" 설정
+  const { code, title, problemId, desc = "", problemInput, problemOutput, problemHint, input, output, language, tags } = data;
   const notionLang = mapBojLangToNotion(language);
 
-  // 키 가져오기
   const storageData = await chrome.storage.sync.get(["geminiKey", "notionToken", "dbId"]);
   const keys = {
     geminiKey: storageData.geminiKey ? storageData.geminiKey.trim() : "",
@@ -64,20 +65,19 @@ async function processRequest(data) {
 
   if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
 
-  // 1.티어 정보를 직접 가져옵니다
+  // 1. Solved.ac 티어 가져오기
   let tierName = "Unrated";
   try {
     const solvedRes = await fetch(`https://solved.ac/api/v3/problem/show?problemId=${problemId}`);
     if (solvedRes.ok) {
       const solvedData = await solvedRes.json();
-      tierName = convertTier(solvedData.level); // 아래에 추가할 함수 사용
+      tierName = convertTier(solvedData.level);
     }
   } catch (e) {
     console.log("Tier fetch failed:", e);
   }
-  if (!keys.geminiKey || !keys.notionToken || !keys.dbId) throw new Error("API 키 설정 필요");
 
-  // Gemini 요청
+  // 2. Gemini 요청
   const prompt = `
       당신은 **성장하는 주니어 개발자**입니다. 
       아래 **${language}** 코드는 당신이 직접 푼 알고리즘 문제의 정답 코드입니다.
@@ -87,13 +87,13 @@ async function processRequest(data) {
 
       [작성 가이드]
       1. **접근 방법 (Why)**: 문제 유형을 파악하고, **"왜 이 알고리즘을 선택했는지"**에 대한 나의 판단 근거를 적으세요.
-      2. **풀이 로직 (How)**: 코드의 흐름을 내가 다시 봐도 이해하기 쉽게 단계별로 요약하세요. 그렇다고 너무 장황하지 않게 핵심 위주로 작성하세요.
+      2. **풀이 로직 (How)**: 코드의 흐름을 내가 다시 봐도 이해하기 쉽게 단계별로 요약하세요.
       3. **복잡도 분석**: 면접 대비용으로 시간/공간 복잡도(Big-O)를 분석하고, 효율적인지 스스로 평가하세요.
       4. **회고/배운 점**: 풀면서 막혔던 부분이나, 이 문제에서 얻어간 핵심 개념을 짧게 짚으세요.
 
       [출력 규칙]
       1. 결과는 반드시 **순수한 JSON** 포맷이어야 합니다.
-      2. 말투는 **"~했다", "~이다", "~함" 등 간결하고 단정적인 평어체(반말)**를 사용하세요. (예: "BFS를 사용했다.", "시간 초과가 우려되어 DP로 변경함.")
+      2. 말투는 **"~했다", "~이다", "~함" 등 간결하고 단정적인 평어체(반말)**를 사용하세요.
       3. 문장은 **"~라고 판단해 ~를 적용했다"** 같이 인과관계가 명확해야 합니다.
 
       [JSON 예시 형식을 꼭 지킬 것]
@@ -149,19 +149,53 @@ async function processRequest(data) {
     } catch (e) {}
   }
 
-  // 노션 블록 조립
+  // 3. 노션 블록 조립
   const childrenBlocks = [];
-  const problemInfoChildren = [
-    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(desc.substring(0, 1500)) } },
+  const problemInfoChildren = [];
+
+  // 문제 설명 (텍스트 + 이미지 혼합)
+  if (data.descBlocks && data.descBlocks.length > 0) {
+    data.descBlocks.forEach((block) => {
+      if (block.type === "text") {
+        const content = block.content;
+        for (let i = 0; i < content.length; i += 2000) {
+          problemInfoChildren.push({
+            object: "block",
+            type: "paragraph",
+            paragraph: { rich_text: createRichText(content.substring(i, i + 2000)) },
+          });
+        }
+      } else if (block.type === "image") {
+        problemInfoChildren.push({
+          object: "block",
+          type: "image",
+          image: { type: "external", external: { url: block.content } },
+        });
+      }
+    });
+  } else {
+    // 블록 데이터가 없으면 기존 text desc 사용 (안전장치)
+    const safeDesc = desc || "문제 설명이 수집되지 않았습니다.";
+    problemInfoChildren.push({
+      object: "block",
+      type: "paragraph",
+      paragraph: { rich_text: createRichText(safeDesc.substring(0, 1500)) },
+    });
+  }
+
+  // 입력/출력 등 나머지 정보 추가
+  problemInfoChildren.push(
     { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "입력" } }] } },
     { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemInput.substring(0, 1000)) } },
     { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "출력" } }] } },
-    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) } },
-  ];
+    { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemOutput.substring(0, 1000)) } }
+  );
 
   if (problemHint && problemHint.length > 0) {
-    problemInfoChildren.push({ object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "힌트" } }] } });
-    problemInfoChildren.push({ object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemHint.substring(0, 1000)) } });
+    problemInfoChildren.push(
+      { object: "block", type: "heading_3", heading_3: { rich_text: [{ text: { content: "힌트" } }] } },
+      { object: "block", type: "paragraph", paragraph: { rich_text: createRichText(problemHint.substring(0, 1000)) } }
+    );
   }
 
   problemInfoChildren.push(
@@ -185,36 +219,21 @@ async function processRequest(data) {
   const analysisList = analysisData.analysis || ["분석 내용 없음"];
   analysisList.forEach((line) => {
     const rawText = line.trim();
-
-    // 1. 빈 줄이거나, AI가 가끔 내뱉는 "리스트", "목록" 같은 불필요한 텍스트는 아예 블록 생성을 안 함 (점 생성 방지)
     if (!rawText || rawText === "리스트" || rawText === "목록") return;
 
-    // 2. 제목 판별 로직: "**"로 시작하거나, 특정 이모지가 포함된 짧은 문장
     const isHeader =
       rawText.startsWith("**") || (rawText.length < 30 && (rawText.includes("💡") || rawText.includes("📝") || rawText.includes("⏳") || rawText.includes("🚀") || rawText.includes("회고")));
-
     const richContent = createRichText(cleanText(rawText));
 
     if (isHeader) {
-      // 제목인 경우: Heading 3 (점이 없고 글씨가 큼)
-      childrenBlocks.push({
-        object: "block",
-        type: "heading_3",
-        heading_3: { rich_text: richContent },
-      });
+      childrenBlocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: richContent } });
     } else {
-      // 본문인 경우: Bulleted List Item (점이 찍힘)
-      childrenBlocks.push({
-        object: "block",
-        type: "bulleted_list_item",
-        bulleted_list_item: { rich_text: richContent },
-      });
+      childrenBlocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: richContent } });
     }
   });
 
   childrenBlocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ text: { content: `💻 ${language} Code` } }] } });
 
-  // 코드를 2000자씩 잘라서 '하나의 블록' 안에 '여러 개의 텍스트 덩어리'로 넣기
   const codeChunks = [];
   for (let i = 0; i < code.length; i += 2000) {
     codeChunks.push({
@@ -227,14 +246,14 @@ async function processRequest(data) {
     type: "code",
     code: {
       language: notionLang,
-      rich_text: codeChunks, // 배열 전체를 넣으면 하나로 합쳐짐
+      rich_text: codeChunks,
     },
   });
 
   const today = new Date().toISOString().split("T")[0];
   const finalTags = (tags || []).map((tag) => ({ name: tag }));
 
-  // ▼▼▼ [properties 부분 수정] ▼▼▼
+  // [중요] 여기 URL 수정됨
   const notionRes = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
@@ -248,8 +267,6 @@ async function processRequest(data) {
         이름: { title: [{ text: { content: title } }] },
         날짜: { date: { start: today } },
         알고리즘: { multi_select: finalTags },
-
-        // data.tier 대신, 방금 background에서 직접 구한 tierName을 사용
         난이도: { select: { name: tierName } },
         언어: { select: { name: data.language || "Unknown" } },
       },
@@ -257,13 +274,12 @@ async function processRequest(data) {
     }),
   });
 }
+
 function convertTier(level) {
   if (level === 0 || !level) return "Unrated";
-
   const tiers = ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ruby"];
   const index = Math.floor((level - 1) / 5);
   const step = 5 - ((level - 1) % 5);
-
   if (index >= tiers.length) return "Master";
   return `${tiers[index]} ${step}`;
 }

@@ -127,27 +127,78 @@ async function startProcess(submitId, problemId, language) {
     const titleElement = problemDoc.querySelector("#problem_title");
     const fullTitle = `${problemId}번: ${titleElement ? titleElement.innerText.trim() : `${problemId}번 문제`}`;
 
-    // 백준 '알고리즘 분류' 태그 직접 가져오기
-    // 보통 href="/problem/tag/..." 형태의 링크로 되어 있음
     const tagElements = problemDoc.querySelectorAll('a[href^="/problem/tag/"]');
     const problemTags = Array.from(tagElements).map((el) => el.innerText.trim());
 
-    // 요소 선택
     const descEl = problemDoc.querySelector("#problem_description");
     const inputEl = problemDoc.querySelector("#problem_input");
     const outputEl = problemDoc.querySelector("#problem_output");
     const hintEl = problemDoc.querySelector("#problem_hint");
 
-    [descEl, inputEl, outputEl, hintEl].forEach((el) => {
+    let descriptionBlocks = [];
+    let descText = "";
+
+    if (descEl) {
+      descText = descEl.innerText.trim();
+      const descClone = descEl.cloneNode(true);
+      const imgs = descClone.querySelectorAll("img");
+      const imgMap = {};
+
+      imgs.forEach((img, index) => {
+        const rawSrc = img.getAttribute("src");
+        if (!rawSrc) return;
+
+        let fullSrc = "";
+        try {
+          // 절대 경로로 변환
+          fullSrc = new URL(rawSrc, "https://www.acmicpc.net").href;
+        } catch (e) {
+          console.error("URL 변환 실패:", e);
+          return;
+        }
+
+        // [핵심] AWS S3 링크인 경우에만 이미지로 처리
+        if (fullSrc.includes("amazonaws.com")) {
+          const marker = `{{__IMG_${index}__}}`;
+          imgMap[marker] = fullSrc;
+
+          const span = document.createElement("span");
+          span.innerText = `\n${marker}\n`; // 나중에 이미지 블록으로 변환됨
+          img.replaceWith(span);
+        } else {
+          // S3가 아니면(백준 서버 등) -> 404 에러 방지를 위해 텍스트 링크로 대체
+          const span = document.createElement("span");
+          // 노션에 텍스트로 "(이미지 보기: 주소)" 형태로 들어감
+          span.innerText = `\n (이미지 보기: ${fullSrc}) \n`;
+          img.replaceWith(span);
+        }
+      });
+
+      convertTablesToText(descClone);
+      convertPresToBackticks(descClone);
+
+      const rawText = descClone.innerText;
+      const parts = rawText.split(/({{__IMG_\d+__}})/g);
+
+      parts.forEach((part) => {
+        const trimmed = part.trim();
+        if (!trimmed) return;
+        if (trimmed.match(/{{__IMG_\d+__}}/)) {
+          descriptionBlocks.push({ type: "image", content: imgMap[trimmed] });
+        } else {
+          descriptionBlocks.push({ type: "text", content: trimmed });
+        }
+      });
+    }
+
+    [inputEl, outputEl, hintEl].forEach((el) => {
       convertTablesToText(el);
       convertPresToBackticks(el);
     });
 
-    const description = descEl?.innerText.trim() || "내용 없음";
     const problemInput = inputEl?.innerText.trim() || "입력 설명 없음";
     const problemOutput = outputEl?.innerText.trim() || "출력 설명 없음";
     const problemHint = hintEl?.innerText.trim() || "";
-
     const inputEx = problemDoc.querySelector("#sample-input-1")?.innerText.trim() || "없음";
     const outputEx = problemDoc.querySelector("#sample-output-1")?.innerText.trim() || "없음";
 
@@ -158,7 +209,8 @@ async function startProcess(submitId, problemId, language) {
           code,
           title: fullTitle,
           problemId,
-          desc: description,
+          descBlocks: descriptionBlocks,
+          desc: descText, // [중요] 안전장치용 텍스트 추가
           problemInput,
           problemOutput,
           problemHint,
@@ -171,10 +223,8 @@ async function startProcess(submitId, problemId, language) {
       (response) => {
         if (response.success) {
           showToast(`"${fullTitle}" 저장 완료!`, "success");
-          // 성공했을 때만 영구 저장소(storage)에 업데이트
           chrome.storage.local.set({ processedList: Array.from(processedSubmissions) });
         } else {
-          // 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
           showToast(`실패: ${response.error || "오류"}\n(새로고침하면 다시 시도합니다)`, "error");
         }
         isProcessing = false;
@@ -182,7 +232,6 @@ async function startProcess(submitId, problemId, language) {
     );
   } catch (e) {
     console.error("수집 실패:", e);
-    // 실패 시 재시도 로직(delete) 제거 및 안내 메시지 변경
     showToast("데이터 수집 중 오류 발생\n(새로고침하면 다시 시도합니다)", "error");
     isProcessing = false;
   }
